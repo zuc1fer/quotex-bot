@@ -1,24 +1,4 @@
-"""Live loop on Quotex — DEMO account only, MULTI-ASSET.
 
-Trades every OPEN asset whose short-trade (turbo) payout is >= --min-payout,
-refreshing that watchlist periodically. Best-effort concurrent: orders are
-fired across assets with minimal spacing. The vendored client correlates
-orders via shared state, so rapid-fire placements can collide on order id;
-those are detected, dropped, and logged as KNOWN noise (never counted in the
-win/loss tally). Results are resolved from the AUTHORITATIVE Quotex
-closed-deal profit, not reconstructed.
-
-Demo-gated end to end: config.py refuses unsafe real mode, QuotexConnector
-forces PRACTICE and re-checks the live account on every order, executor.py
-blocks real orders without explicit opt-in.
-
-  python scripts/run_live.py --strategy revert --min-payout 0.80
-
-Stop with Ctrl+C. Risk limits from .env apply; the kill switch latches if
-the daily loss limit is hit. There is no backtest: a strategy is judged only
-by the win rate it accumulates here vs the breakeven (~52% at ~92% payout),
-and you need a large sample before that number means anything.
-"""
 from __future__ import annotations
 
 import argparse
