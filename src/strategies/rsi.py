@@ -1,7 +1,8 @@
 """Sample strategy: RSI mean-reversion.
 
 CALL when RSI exits oversold (crosses up through `low`), PUT when it exits
-overbought (crosses down through `high`). Baseline only — backtest first.
+overbought (crosses down through `high`). Baseline only — prove it on the
+live demo win rate before believing it.
 """
 from __future__ import annotations
 

@@ -1,8 +1,8 @@
 """Strategy interface.
 
 A strategy is a PURE function of price history -> Signal. No I/O, no network,
-no state about money. That purity is what makes it backtestable and unit-
-testable, and is why we can prove (or disprove) an edge before risking a cent.
+no state about money. That purity keeps it unit-testable and keeps the trading
+decision fully separated from the fragile Quotex connector.
 """
 from __future__ import annotations
 

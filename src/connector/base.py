@@ -1,6 +1,6 @@
 """Connector interface — the ONLY place coupled to Quotex.
 
-Everything else (strategies, risk, backtest) depends on this abstraction, not
+Everything else (strategies, risk, executor) depends on this abstraction, not
 on the fragile unofficial library. When Quotex changes their protocol, only
 quotex.py breaks; the rest of the system keeps working and stays testable.
 """

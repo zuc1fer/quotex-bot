@@ -2,7 +2,7 @@
 
 CALL when the fast SMA crosses ABOVE the slow SMA, PUT when it crosses BELOW.
 This is a classic baseline — useful to validate the harness, NOT a proven
-money-maker. Backtest it before believing it.
+money-maker. Prove it on the live demo win rate before believing it.
 """
 from __future__ import annotations
 

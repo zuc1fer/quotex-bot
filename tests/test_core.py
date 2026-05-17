@@ -6,24 +6,23 @@ import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config import RiskConfig
-from src.backtest import run_backtest
-from src.connector.simulated import synthetic_series
 from src.risk import RiskManager
 from src.strategies import SmaCrossStrategy
 from src.types import Signal
 
 
-def test_breakeven_math():
-    df = synthetic_series(n=500)
-    res = run_backtest(SmaCrossStrategy(), df, payout_rate=0.85)
-    assert abs(res.breakeven_win_rate - 1 / 1.85) < 1e-9
+def _flat_candles(n: int) -> pd.DataFrame:
+    """Minimal OHLC frame for exercising strategy plumbing without a feed."""
+    return pd.DataFrame({
+        "ts": range(n),
+        "open": [1.0] * n, "high": [1.0] * n,
+        "low": [1.0] * n, "close": [1.0] * n, "volume": [0.0] * n,
+    })
 
 
-def test_no_lookahead_signal_uses_only_past():
-    # Strategy must return NONE before warmup is satisfied.
+def test_strategy_returns_none_before_warmup():
     s = SmaCrossStrategy(fast=5, slow=20)
-    df = synthetic_series(n=10)
-    assert s.generate(df) is Signal.NONE
+    assert s.generate(_flat_candles(10)) is Signal.NONE   # warmup = slow + 1
 
 
 def test_risk_kill_switch_trips_on_daily_loss():
@@ -44,10 +43,3 @@ def test_risk_caps_trades_per_day():
     rm.register(1.0)
     ok, why = rm.can_trade()
     assert not ok and "max trades" in why
-
-
-def test_backtest_runs_and_counts():
-    df = synthetic_series(n=1000)
-    res = run_backtest(SmaCrossStrategy(), df, payout_rate=0.85, expiry_bars=1)
-    assert res.trades >= 0
-    assert res.wins <= res.trades
