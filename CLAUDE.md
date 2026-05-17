@@ -22,7 +22,7 @@ python -m pytest tests/test_safety.py -q  # the safety guards (most important)
 python -m pytest tests/test_core.py::test_risk_caps_trades_per_day -q   # single test
 
 python scripts/check_connection.py        # verify Quotex login + demo guard, places NO trades
-python scripts/run_live.py --asset EURUSD_otc --strategy rsi   # trade live on DEMO
+python scripts/run_live.py --strategy revert --min-payout 0.80  # multi-asset live DEMO
 ```
 
 Running anything that touches Quotex requires `QUOTEX_EMAIL` / `QUOTEX_PASSWORD`
@@ -41,9 +41,16 @@ unit-testable without the broker:
 - **`QuotexConnector` bridges async→sync.** The vendored pyquotex client is
   fully async; the rest of the codebase is sync. One asyncio loop runs in a
   daemon thread (`_LoopThread`); coroutines are marshalled onto it. `buy()`
-  spawns `check_win` as a future so `result()` is non-blocking and returns
-  `None` until expiry. `run_live.py:run_realtime` polls pending results and
-  acts once per freshly-closed candle.
+  uses `time_mode="TIMER"` (literal duration; the default "TIME"/fast-option
+  snaps sub-60s expiry to the next clock-minute). `result()` reads the
+  AUTHORITATIVE closed-deal profit from `client.api.listinfodata` (populated
+  by `api._on_message` — same data as the UI history list; the HTTP history
+  endpoint is dead/404) and returns `None` (never a fabricated loss) until
+  the deal closes. `check_win` is intentionally NOT used. pyquotex correlates
+  orders via shared state, so rapid placements can return a duplicate id —
+  `buy()` raises `OrderIdCollision`, which `Executor.trade` drops+logs as
+  known noise rather than miscounting. `run_live.py:run_multi` sweeps the
+  payout watchlist, acting once per freshly-closed candle per asset.
 - **pyquotex is vendored in `vendor/pyquotex`** (its packaging is broken and
   pins `<4.0` Python). `src/connector/quotex.py` inserts `vendor/` into
   `sys.path` at import. If Quotex changes their protocol, *only*

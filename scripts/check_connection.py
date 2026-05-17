@@ -29,8 +29,7 @@ def main() -> None:
         print(f"  is_demo     : {conn.is_demo}")
         print(f"  balance     : {conn.balance():.2f}")
         if conn.is_demo:
-            print("\nDemo guard OK — safe to run scripts/run_live.py "
-                  "--connector quotex")
+            print("\nDemo guard OK - safe to run scripts/run_live.py")
         else:
             print("\nWARNING: live account is REAL.")
     finally:

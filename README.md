@@ -32,16 +32,25 @@ cp .env.example .env                   # fill QUOTEX_EMAIL / QUOTEX_PASSWORD
 # 1. Verify the connection + prove the demo guard (places NO trades)
 python scripts/check_connection.py
 
-# 2. Trade live on the DEMO account
-python scripts/run_live.py --asset EURUSD_otc --strategy rsi
+# 2. Trade live on the DEMO account, multi-asset
+python scripts/run_live.py --strategy revert --min-payout 0.80
 
 # 3. Tests (safety guards + core logic)
 python -m pytest -q
 ```
 
-`EURUSD_otc` (OTC) trades 24/7 incl. weekends; non-OTC pairs follow market
-hours. Stop with Ctrl+C. The risk limits in `.env` (stake / daily-loss /
-trades-per-day) apply and the kill switch latches if the daily loss is hit.
+`run_live.py` trades every OPEN asset whose short-trade (turbo) payout is
+`>= --min-payout`, refreshing that watchlist periodically and firing orders
+best-effort concurrently (5s TIMER options). Stop with Ctrl+C. Risk limits in
+`.env` (stake / daily-loss / trades-per-day) apply; the kill switch latches if
+the daily loss is hit.
+
+Results are resolved from the **authoritative Quotex closed-deal profit**
+(`api.listinfodata`), not reconstructed. The vendored client correlates orders
+via shared state, so rapid-fire placements can return a duplicate id; those
+are detected, dropped, and logged as known noise — never miscounted. The HTTP
+trade-history endpoint the vendored lib targets is dead (404 — Quotex moved
+it); the websocket closed-deal feed is the same data the UI list shows.
 
 ## Architecture
 

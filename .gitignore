@@ -1,9 +1,35 @@
+# ───────────────────────────────────────────────────────────────
+# ACCOUNT SECRETS — never commit. A leak here = account takeover.
+# ───────────────────────────────────────────────────────────────
+# Credentials (QUOTEX_EMAIL / QUOTEX_PASSWORD live here)
 .env
+.env.*
+!.env.example
+
+# pyquotex session token / SSID — resumes a logged-in Quotex
+# session WITHOUT the password. Treat as a live credential.
+session.json
+session/
+*.session
+*.ssid
+*.cookies
+cookies.txt
+config.ini
+
+# ───────────────────────────────────────────────────────────────
+# Operational logs — contain trade activity, balances, asset data
+# ───────────────────────────────────────────────────────────────
+logs/
+*.log
+data/*.log
+data/*.csv
+!data/.gitkeep
+
+# ───────────────────────────────────────────────────────────────
+# Python / tooling
+# ───────────────────────────────────────────────────────────────
 __pycache__/
 *.pyc
 .pytest_cache/
-data/*.csv
-!data/.gitkeep
-logs/
 .venv/
 venv/

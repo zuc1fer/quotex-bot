@@ -1,20 +1,23 @@
-"""Live loop on Quotex — DEMO account only.
+"""Live loop on Quotex — DEMO account only, MULTI-ASSET.
 
-Connects to the real Quotex WebSocket via the vendored pyquotex client, but is
-demo-gated end to end: config.py refuses unsafe real mode, QuotexConnector
-forces the PRACTICE account and re-checks the live account on every order, and
-executor.py blocks any real-money order without explicit opt-in.
+Trades every OPEN asset whose short-trade (turbo) payout is >= --min-payout,
+refreshing that watchlist periodically. Best-effort concurrent: orders are
+fired across assets with minimal spacing. The vendored client correlates
+orders via shared state, so rapid-fire placements can collide on order id;
+those are detected, dropped, and logged as KNOWN noise (never counted in the
+win/loss tally). Results are resolved from the AUTHORITATIVE Quotex
+closed-deal profit, not reconstructed.
 
-One decision per freshly-closed candle, in wall-clock real time. There is no
-backtest and no simulated feed: a strategy is judged by the win rate it
-accumulates here, on Quotex's actual feed, versus the breakeven win rate
-(~54% at an 85% payout). You need ~100+ trades before that number means
-anything.
+Demo-gated end to end: config.py refuses unsafe real mode, QuotexConnector
+forces PRACTICE and re-checks the live account on every order, executor.py
+blocks real orders without explicit opt-in.
 
-  python scripts/run_live.py --asset EURUSD_otc --strategy rsi
+  python scripts/run_live.py --strategy revert --min-payout 0.80
 
-Stop with Ctrl+C. Risk limits from .env (stake / daily-loss / trades-per-day)
-apply and the kill switch latches if the daily loss limit is hit.
+Stop with Ctrl+C. Risk limits from .env apply; the kill switch latches if
+the daily loss limit is hit. There is no backtest: a strategy is judged only
+by the win rate it accumulates here vs the breakeven (~52% at ~92% payout),
+and you need a large sample before that number means anything.
 """
 from __future__ import annotations
 
@@ -35,34 +38,72 @@ from src.strategies import REGISTRY  # noqa: E402
 log = get_logger("run_live")
 
 
-def run_realtime(conn, ex, strat, risk, args) -> None:
-    """Act once per closed candle, polling pending results in between."""
-    last_ts = None
+def run_multi(conn, ex, strat, risk, args) -> None:
+    """Sweep the payout watchlist, acting once per closed candle per asset.
+
+    Stops when the risk manager refuses further trades (kill switch OR
+    trades/day cap) AND every placed order has resolved, so the run ends
+    on its own instead of spinning forever.
+    """
+    last_ts: dict[str, int] = {}
+    watch: list[str] = []
+    next_refresh = 0.0
+
     while True:
         ex.poll_pending()
-        if risk.tripped:
-            log.warning("kill switch tripped - stopping")
+        ok, why = risk.can_trade()
+        if not ok and ex.pending == 0:
+            log.info("stopping: %s (all orders settled, day_pnl=%+.2f)",
+                     why, risk.day_pnl)
             break
-        candles = conn.candles(args.asset, args.timeframe, strat.warmup + 10)
-        if len(candles) < strat.warmup:
-            log.info("waiting for candle data...")
-            time.sleep(args.timeframe)
+
+        now = time.time()
+        if now >= next_refresh:
+            watch = conn.payout_watchlist(args.min_payout)
+            if args.max_assets > 0:
+                watch = watch[:args.max_assets]
+            next_refresh = now + args.refresh
+            log.info("watchlist: %d assets payout>=%.0f%% (%s%s)",
+                     len(watch), args.min_payout * 100,
+                     ", ".join(watch[:6]),
+                     " ..." if len(watch) > 6 else "")
+
+        if not watch:
+            log.info("no assets above payout threshold; waiting...")
+            time.sleep(args.refresh)
             continue
-        ts = int(candles.iloc[-1]["ts"])
-        if ts != last_ts:                       # act once per closed candle
-            last_ts = ts
+
+        for asset in watch:
+            if not ok:
+                break
+            candles = conn.candles(asset, args.timeframe, strat.warmup + 10)
+            if len(candles) < strat.warmup:
+                continue
+            ts = int(candles.iloc[-1]["ts"])
+            if ts == last_ts.get(asset):
+                continue                       # already acted on this candle
+            last_ts[asset] = ts
             sig = strat.generate(candles)
-            ex.trade(args.asset, sig, args.expiry_bars * args.timeframe)
+            ex.trade(asset, sig, args.expiry_bars * args.timeframe)
+            if args.spacing > 0:
+                time.sleep(args.spacing)
+
         time.sleep(max(1, args.timeframe // 4))
 
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--strategy", choices=list(REGISTRY), default="rsi")
-    p.add_argument("--asset", default="EURUSD_otc",
-                   help="_otc assets trade 24/7; non-OTC follow FX hours")
+    p.add_argument("--strategy", choices=list(REGISTRY), default="revert")
+    p.add_argument("--min-payout", type=float, default=0.80,
+                   help="trade assets with turbo payout >= this (0-1)")
+    p.add_argument("--max-assets", type=int, default=0,
+                   help="cap watchlist size (0 = no cap / all)")
+    p.add_argument("--refresh", type=int, default=60,
+                   help="seconds between watchlist refreshes")
+    p.add_argument("--spacing", type=float, default=0.0,
+                   help="seconds between placements (0 = best-effort)")
     p.add_argument("--expiry-bars", type=int, default=1)
-    p.add_argument("--timeframe", type=int, default=60)
+    p.add_argument("--timeframe", type=int, default=5)
     args = p.parse_args()
 
     settings = load_settings()               # raises if real requested unsafely
@@ -78,16 +119,14 @@ def main() -> None:
     log.info("connecting to Quotex (first run may need Cloudflare/2FA)...")
     conn.connect()
     acct = "DEMO" if conn.is_demo else "REAL"
-    log.info("connected [%s] balance=%.2f strategy=%s asset=%s",
-             acct, conn.balance(), strat.name, args.asset)
+    log.info("connected [%s] balance=%.2f strategy=%s tf=%ss",
+             acct, conn.balance(), strat.name, args.timeframe)
     if not conn.is_demo:
-        # QuotexConnector already refuses this unless explicitly opted in;
-        # this is a last visible stop before the loop.
         raise SystemExit("Live account is REAL — refusing to run the loop.")
 
     ex = Executor(conn, risk, settings)
     try:
-        run_realtime(conn, ex, strat, risk, args)
+        run_multi(conn, ex, strat, risk, args)
     except KeyboardInterrupt:
         log.info("interrupted by user")
     finally:

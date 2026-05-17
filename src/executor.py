@@ -12,6 +12,12 @@ from src.logger import get_logger
 from src.risk import RiskManager
 from src.types import Signal, TradeResult
 
+try:                                      # connector-specific, optional
+    from src.connector.quotex import OrderIdCollision
+except Exception:                         # pragma: no cover
+    class OrderIdCollision(RuntimeError):
+        ...
+
 log = get_logger("executor")
 
 
@@ -26,6 +32,11 @@ class Executor:
         self.risk = risk
         self.s = settings
         self._pending: list[str] = []
+
+    @property
+    def pending(self) -> int:
+        """Orders placed but not yet resolved."""
+        return len(self._pending)
 
     def _assert_safe(self) -> None:
         if not self.c.is_demo and not self.s.is_real:
@@ -52,7 +63,12 @@ class Executor:
         log.info("[%s] %s %s stake=%.2f dur=%ss",
                  acct, signal.value.upper(), asset, amount, duration_sec)
 
-        oid = self.c.buy(asset, signal, amount, duration_sec)
+        try:
+            oid = self.c.buy(asset, signal, amount, duration_sec)
+        except OrderIdCollision as e:
+            # Known best-effort-concurrent noise: do NOT count it.
+            log.warning("trade dropped: %s", e)
+            return None
         self._pending.append(oid)
         return oid
 
@@ -60,10 +76,14 @@ class Executor:
         """Resolve any expired orders; register their P&L with the risk mgr."""
         done: list[TradeResult] = []
         still: list[str] = []
+        is_pending = getattr(self.c, "is_pending", None)
         for oid in self._pending:
             res = self.c.result(oid)
             if res is None:
-                still.append(oid)
+                # Keep waiting, unless the connector has dropped it as a
+                # stale/voided order (then it must not block forever).
+                if is_pending is None or is_pending(oid):
+                    still.append(oid)
                 continue
             self.risk.register(res.pnl)
             log.info("result %s pnl=%+.2f day_pnl=%+.2f",
